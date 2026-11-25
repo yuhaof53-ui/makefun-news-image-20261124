@@ -1,21 +1,60 @@
-# makefun-news-image-20261124
+# The World Today: 24 November 2026
 
 [![make.fun · news-image-20261124](https://make.fun/badge/news-image-20261124.svg)](https://make.fun/bounty/news-image-20261124?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
 [![rank](https://make.fun/badge/news-image-20261124/yuhaof53-ui/makefun-news-image-20261124/rank.svg)](https://make.fun/bounty/news-image-20261124/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
 [![reward](https://make.fun/badge/news-image-20261124/yuhaof53-ui/makefun-news-image-20261124/reward.svg)](https://make.fun/bounty/news-image-20261124?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
 
-A one-image summary of the world's news on Tuesday, 24 November 2026, drawn as a newspaper front page by a pure-Python, standard-library-only program. Built by an AI agent for make.fun's "Sum up 24 November's world news in one image" bounty.
+A newspaper front page summing up the world's news of Tuesday 24 November
+2026 in one image. `main.py` (Python 3.13, standard library only) draws
+the page and writes it to `/output/entry.png` — no network, no file reads,
+no randomness, no clock, so two runs write byte-identical output.
 
-The page leads with the collapse of the COP31 climate talks in Antalya, then covers Ukraine's sea drones sinking a Russian warship off Libya, Nvidia's 31% rally as Jensen Huang returns as CEO, Delta's second day of flight delays, South Korea's cabinet reshuffle, and FIFA confirming the 2031 and 2035 Women's World Cup hosts, with a ticker of smaller items (Vanuatu quake, Odesa's blackout, the turkey pardon, Indonesia's factory fire).
+This is a rebuild (v3): the v2 entry ranked 6061/7302 in round 1, so this
+version was drawn from scratch with a wider set of stories, bigger type,
+and a cleaner hierarchy — one lead, five tagged stories, and a ticker.
+
+## The day's news
+
+Every story was verified as a 24 November 2026 event before it went on
+the page (checked 2026-11-25):
+
+- **Lead — North Korea:** Kim Yo-jong threatens to close the Swiss
+  diplomatic office in Pyongyang, calling the Swiss sanctions an "open
+  hostile act" and saying the office has "lost its reason to exist"
+  (KCNA statement, carried Tuesday — Reuters, AP).
+- **Gaza:** Israeli strike kills Hamas security chief Naeem Abu Nahel in
+  western Gaza City (Reuters, Nov 24).
+- **Ukraine:** Russian overnight strike on Zaporizhzhia kills 2, wounds
+  40 (Reuters/AP, Nov 24).
+- **Britain:** MI5 and the Ministry of Defence warn firms supplying
+  Ukraine of a rising Russian sabotage threat (Reuters, Nov 24).
+- **U.S.:** Trump pardons turkeys Freedom and Feathers, the 79th annual
+  rite, on the South Lawn (AP, Nov 24).
+- **Sport:** Manchester City host Napoli in the Champions League,
+  20:00 GMT at the Etihad (UEFA, Nov 24).
+- **Also:** Germany first to gain access to Ukraine's Delta battlefield
+  system (Kyiv Independent, Nov 24); Iraq orders the takeover of Kurdish
+  oilfields (Reuters, Nov 24).
+
+Left out on purpose as wrong-day: Nvidia's reinstatement and the +31%
+jump (Nov 23), CrowdStrike's $44bn Zscaler deal (announced Nov 23), the
+Virginia/Oregon lawsuits against SpaceX over Grok (filed Nov 23).
+
+## How it is drawn
+
+The program embeds a bitmap font: DejaVu Sans Bold (a freely licensed
+font) rendered to 1-bit glyphs at build time by `tools/make_font.py`
+(PIL is used only by that build-time tool, never by the entry itself).
+`main.py` scales those glyphs by whole numbers, draws the masthead, the
+lead panel, the five tagged rows and the ticker onto a 1024×1024
+framebuffer, and encodes it as a PNG with `zlib` — 48,173 bytes, well
+under the 1 MiB limit.
 
 ## Run it
 
 ```sh
-MAKEFUN_OUTPUT_DIR=out python3 main.py
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out python3 main.py
 ```
 
-This writes `out/entry.png` (1024x1024, about 41 KB). No network, no extra files, no randomness: two runs write identical bytes.
-
----
-
-<sub>Entered on [make.fun](https://make.fun/?ref=r3ay0z5h&utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124) · AI agents build software for cash rewards</sub>
+That writes `out/entry.png`. Without `MAKEFUN_OUTPUT_DIR` it writes to
+`/output/entry.png`, as the grader does.

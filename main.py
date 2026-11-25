@@ -1,367 +1,483 @@
 #!/usr/bin/env python3
-"""THE WORLD TODAY -- front page for Tuesday 24 November 2026.
+"""THE WORLD TODAY -- front page for Tuesday 24 November 2026 (v3 rebuild).
 
-Pure standard library: draws a newspaper front page with a 15x17
-bitmap font (DejaVu Sans Bold, embedded below as base64) and writes a
-1024x1024 PNG to /output/entry.png. No network, no file reads, no
-randomness, no clock: two runs write identical bytes.
+Pure standard library: draws a newspaper front page with a bitmap font
+(DejaVu Sans Bold, rendered to bitmaps at build time by tools/make_font.py
+and embedded below) and writes a 1024x1024 PNG to /output/entry.png.
+No network, no file reads, no randomness, no clock: two runs write
+identical bytes.
 
-Stories, each verified as a 24 November 2026 event:
-- N. Korea: Kim Yo Jong threatens to close the Swiss diplomatic
-  office in Pyongyang (KCNA statement, Tuesday).
-- Washington: Trump pardons turkeys Freedom and Feathers at
-  2 p.m. on the South Lawn, the 79th annual rite.
-- WHO chief Tedros in Cuba on day three of a three-day visit,
-  touring a darkened children's heart ward in Havana.
-- Sport: Manchester City host Napoli tonight; Maresca calls life
-  after Guardiola a reset.
+Stories, each verified as a 24 November 2026 event (checked 2026-11-25):
+- LEAD, North Korea: Kim Yo-jong threatens to close the Swiss diplomatic
+  office in Pyongyang; KCNA statement carried on Tuesday (Reuters, AP).
+- Gaza: Israeli strike kills Hamas security chief Naeem Abu Nahel in
+  western Gaza City on Tuesday (Reuters, Nov 24).
+- Ukraine: Russian overnight strike on Zaporizhzhia kills 2, wounds 40
+  (Reuters/AP, Nov 24).
+- Britain: MI5 and the Ministry of Defence warn firms supplying Ukraine
+  of a rising Russian sabotage threat (Reuters, Nov 24).
+- U.S.: Trump pardons turkeys Freedom and Feathers, the 79th annual
+  rite, on the South Lawn on Tuesday (AP, Nov 24).
+- Sport: Manchester City host Napoli in the Champions League, Tuesday
+  20:00 GMT at the Etihad (UEFA, Nov 24).
+- Also: Germany first to gain access to Ukraine's Delta battlefield
+  system (Kyiv Independent, Nov 24); Iraq orders takeover of Kurdish
+  oilfields (Reuters, Nov 24).
+
+Deliberately left out as wrong-day: Nvidia's reinstatement and the +31%
+jump (Nov 23), CrowdStrike's $44bn Zscaler deal (announced Nov 23), the
+Virginia/Oregon lawsuits against SpaceX over Grok (filed Nov 23), the
+WHO chief's Cuba hospital tour (Nov 23; the visit itself runs to Nov 24).
 """
 import base64
-import binascii
-import math
 import os
 import struct
 import zlib
 
 W, H = 1024, 1024
+
 PAPER = (247, 241, 222)
+PANEL = (238, 230, 205)
 INK = (17, 17, 17)
 RED = (176, 30, 36)
-BLUE = (120, 150, 180)
-BROWN = (146, 96, 48)
-DARK_BROWN = (100, 66, 30)
-ORANGE = (214, 120, 32)
+GRAY = (96, 88, 74)
+BLUE = (29, 78, 137)
+SLATE = (55, 71, 79)
+NAVY = (27, 58, 107)
+GREEN = (30, 107, 58)
 WHITE = (255, 255, 255)
-BLACK = (17, 17, 17)
-BOX = (232, 224, 200)
 
-CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,;:!?%()+-/&=$#@*_'\"=\u2022\u2014\u2019\u2013"
-CELL_W, CELL_H = 15, 17
-FONT_B64 = "AAAAAB4APgD8AfgDuA5wHOA44P/B/8ODjgcAAAAAAAAAAAAB/gP+B54PPB5wP+B/wPHB44PHB/4P+AAAAAAAAAAAAAB+Af4HjB4AOABwAOABwAPAA8YD/APwAAAAAAAAAAAAB/gP/B58PDh4cPDx4ePDh4cPPh/4P8AAAAAAAAAAAAAH/A/4HgA8AHgA/wH+A8AHgA8AH/A/4AAAAAAAAAAAAA/4H/A8AHgA8AH+A/wHgA8AHgA8AHgAAAAAAAAAAAAAB/Af8Hhh4AOABwAOPhx8PDg8cD/gP4AAAAAAAAAAAAB4cPDh4cPDh4cP/h/8PDh4cPDh4cPDgAAAAAAAAAAAAB4APAB4APAB4APAB4APAB4APAB4APAAAAAAAAAAAA8AHgA8AHgA8AHgA8AHgA8AHgA8AHgA4AfADwAAAAAAAAPHh54PeB/gP4B+AP4B/gPeB54PHh4eAAAAAAAAAAAAA8AHgA8AHgA8AHgA8AHgA8AHgA/4H/AAAAAAAAAAAAA+H3w++H35+/P3fu753PO553GO4B3AOAAAAAAAAAAAAB4cPjh8cPzh+cO7hzcOfhx8OPhw8OHgAAAAAAAAAAAAD8B/wOPDw4cHjgccDjg8eHBx4P+AfgAAAAAAAAAAAAB/gP+B54PHB44PPB/wP8B4APAB4APAAAAAAAAAAAAfgP+Bx4eHDg8cDjgccHjw4OPB/wD8ADwAPAAAAAAAAAAB/gP+B54PPB5wP8B/gPeB54PHB44PHgAAAAAAAAAAAAD8A/wOGBwAPAA/gD+AHwAOBhwP+A/gAAAAAAAAAAAAB/8P/gHAA4AHAA4AHAA4AHAA4AHAA4AAAAAAAAAAAAAPHh48PHh48PHh48PHh48PHg44H/APgAAAAAAAAAAAADgcODhw8OHA44HOA5wDuAfgD8APgB4AAAAAAAAAAAAAxw+PHx4+fO753bu7N35+/Pjx8ePjw8AAAAAAAAAAAABw8PHA5wD+AfgB4APAD8AfwHOB44OHgAAAAAAAAAAAAPDw48HnAd4B+APgA8AHAA4AHAA4AHAAAAAAAAAAAAAB/4P/ADwAeAHgB4AeADgA8APAB/4P/AAAAAAAAAAAAAAAAAAH8A/wAPAf4H/A44HPA/4D/AAAAAAAAAAAAAAAA4AHAA4AH+A/4HnA4cHDg4cHnA/4H+AAAAAAAAAAAAAAAAAAA+AP4DwAcADgAcADwAP4A+AAAAAAAAAAAAAAAAA4AHAA4B/A/4HPA44HHA44HPA/4D/AAAAAAAAAAAAAAAAAAB8AfwHHA/4H/A4AHjAf4B+AAAAAAAAAAAAAAAAHgB8AOAH8A/gBwAOABwAOABwAOABwAAAAAAAAAAAAAB/Af4HPA44HHA44HPAf4B/AQ4D+APgAAAAAAAAAAAAA4AHAA4AHeA/4HnA44HHA44HHA44HHAAAAAAAAAAAAAA4AHAAAAHAA4AHAA4AHAA4AHAA4AHAAAAAAAAAAAA4AHAAAAHAA4AHAA4AHAA4AHAA4AHAA4AfADwAAAAAAAAHAA4AHAA44HOA7gH4A/AH8A7wHPA48AAAAAAAAAAAAAHAA4AHAA4AHAA4AHAA4AHAA4AHAA4AAAAAAAAAAAAAAAAAA73n/+893HO45/HP45/HP454AAAAAAAAAAAAAAAAAAAA7wH/A84HHA44HHA44HHA44AAAAAAAAAAAAAAAAAAAAB8AfwHHA44HHA44HHAfwB8AAAAAAAAAAAAAAAA/wH/A84HDg4cHDg84H/A/wHAA4AHAAAAAAAAAAAAAAD/A/4HPA44HHA44HPA/4D/AA4AHAA4AAAAAAAAAAAAAAAAAAdwD+AeADgAcADgAcADgAcAAAAAAAAAAAAAAAAAAAAAD4A/gHEA4AD8ADwEOA/wD8AAAAAAAAAAAAAAAAAABwAOAH8A/gBwAOABwAOABwAPgA8AAAAAAAAAAAAAAAAAAHHA44HHA44HHA44HvAf4D/AAAAAAAAAAAAAAAAAAAABw4HHA5wHOAdwD8APgB4APAAAAAAAAAAAAAAAAAAAAAc5znOc5zvsNvh98Pvh54HHAAAAAAAAAAAAAAAAAAAAA44HOAfgB8APAB8AfgHOA44AAAAAAAAAAAAAAAOHA44HOAZwDsAfgB8APAA4AGADwAcAAAAAAAAAAAAAAAAAAAf4D/ABwAcAHABwAeAD/Af4AAAAAAAAAAAAAAAB8AfwHvA44HHA44HHA44HHA94D+APgAAAAAAAAAAAAAPAD4AXAA4AHAA4AHAA4AHAA4Af4D/AAAAAAAAAAAAAD8A/wGPAB4APABwAcAHABwAcAH/A/4AAAAAAAAAAAAAPgH+AR4AOAPgB+AB4AHAA4EPA/wD8AAAAAAAAAAAAAAeAHwA+APwDuAZwHOAxwH/g/8AOABwAAAAAAAAAAAAAfwD+AYADAAfgD+AR4AHAA4GPA/wD8AAAAAAAAAAAAAA+AP4DjA4AH+A/4HnA44HHAc4D+APgAAAAAAAAAAAAA/4H/AB4AOABwAcADgA4AHAB4AOADwAAAAAAAAAAAAAB+A/4HHA44D+AfwHnA44HHA84D/APgAAAAAAAAAAAAAPgD+A54HHA44HPA/4B/AA4COAfwD4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4AHAA4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4AHABwAOABgAAAAAAAAAAAAAAAAAAAAAAAA4AHAA4AAAAAAAAA4AHAA4AOABgAAAAAAAAAAAAAAAAAAA4AHAA4AAAAAAAAA4AHAA4AAAAAAAAAAAAAAAAHAA4AHAA4AHAA4AHAA4AAAA4AHAA4AAAAAAAAAAAAAB8AfwCOABwAOADgA4AHAAAAHAA4AHAAAAAAAAAAAAADww2GGZgzMGzAewAG8BmwJnDM4w2GHgAAAAAAAAAADgAYAHAA4AGABwAOABwAOAAwAHAA4ADAAcAAAAAAAABwAHAA4ADAAcADgAcADgAcADgAYAHAA4AOAAAAAAAAAAAAAADAAYADAAYA/8H/gDAAYADAAYAAAAAAAAAAAAAAAAAAAAAAAB8APgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMABAAYADAAYAGAAwAGABgAMABgAYADAAAAAAAAAAAAfAH8A5AHAA8APjj+cc/Dj4eeB/4H3gAAAAAAAAAAAAAAAAAH/g/8AAAAAH/g/8AAAAAAAAAAAAAAAAAAAAAQACAB8AfwHSA6AD8AP4AXAy4H/AfwAQACAAAAAAAAAAAAzAGYA2A/8H/gMwBsB/8P/gZgDMATAAAAAAAAAAAD8Aw4MBjPszM2ZmzM2ZmzM2Z8Z/BgAGGAfgAAAAAAAAAAAwAWwD+APAD+AWwAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH+AAAAAAAAAAAAAAAAAAAAAAAAwAGAAwAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZgDMAZgDMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH/g/8AAAAAH/g/8AAAAAAAAAAAAAAAAAAAAAAAAAAAAHAB8AfgD8APgB4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH/+//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHAA4AGABwAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAfgD8AAAAAAAAAAAAAAAAAAAAAAAAAA="
+# Bitmap font data, generated by tools/make_font.py from
+# DejaVu Sans Bold (free license, /usr/share/fonts/truetype/dejavu/).
+# Format: FONT[size][codepoint] = (advance, left, top, w, h, base64_rows)
+FONT = {
+    40: {  # ascent 38, descent 10
+        32: (14, 0, 38, 0, 0, ''),
+        33: (18, 0, 9, 18, 29, 'A/gAA/gAA/gAA/gAA/gAA/gAA/gAA/gAA/gAA/gAA/gAA/gAA/AAA/AAA/AAA/AAA/AAA/AAAfAAAAAAAAAAAAAAA/gAA/gAA/gAA/gAA/gAA/gAA/gA'),
+        34: (21, 0, 9, 21, 29, 'Dw+ADw+ADw+ADw+ADw+ADw+ADw+ADw+ADw+ADw+ADw+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+        35: (34, 0, 9, 34, 29, 'AAfB4AAAB4HgAAAHg+AAAAeDwAAAD4PAAAAPg8AAAA8HwAAADwfAAAf///4AB////gAH///+AAf///4AAD4PAAAAPA8AAAA8HwAAADweAAAAfB4AAB////gAH///+AAf///4AB////gAAPA8AAAA8HwAAADweAAAAfB4AAAB4HgAAAHg+AAAAeDwAAAD4PAAAA=='),
+        36: (28, 0, 8, 28, 36, 'AA8AAAAPAAAADwAAAA8AAAB/8AAB//4AB//+AA///gAP7x4AH88CAB+PAAAfjwAAH88AAB//AAAf/4AAD//4AA///gAH//8AAf//AAA//4AAD/+AAA8/gAAPH4AADx+AEA8fgB8PPwAf//8AH//+AB///AAD/+AAAA8AAAAPAAAADwAAAA8AAAAPAAAADwAA'),
+        37: (40, 0, 8, 40, 30, 'A/AAHgAP/AA8AB/+AHwAPz8AeAA+HwD4ADwPgPAAfA+B4AB8D4PgAHwPg8AAfA+HwAA8D4eAAD4fDwAAPx8fAAAf/h4AAA/8Pg/AA/A8P/AAAHh/+AAA+Pz8AADw+HwAAeHwPgAB4fA+AAPB8D4AB8HwPgAHgfA+AA8B8DwAHwD4fAAeAPz8AD4Af/gAPAA/8AB4AA/A'),
+        38: (35, 0, 8, 35, 30, 'AA/4AAAAP/8AAAB//wAAAP//AAAB//8AAAH+BwAAAfwAAAAB/AAAAAH8AAAAAf4AAAAA/gAAAAD/AAAAAf+AAAAD/8A/AAf/4D8AD//wfgAf7/h+AB/H/H4AH4P+/gA/gf/8AD+A//wAP4B/+AAfwD/wAB/gH/AAH/A/8AAP///4AAf///wAA////gAB//j/AAA/wH+A'),
+        39: (12, 0, 9, 12, 29, 'DwAPAA8ADwAPAA8ADwAPAA8ADwAPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='),
+        40: (18, 0, 8, 18, 36, 'AH4AAPwAAPwAAfgAAfgAA/gAA/AAA/AAB/AAB+AAB+AAD+AAD+AAD8AAD8AAD8AAH8AAH8AAH8AAH8AAD8AAD8AAD8AAD+AAD+AAB+AAB+AAB/AAA/AAA/AAA/gAAfgAAfgAAPwAAPwAAH4A'),
+        41: (18, 0, 8, 18, 36, 'H4AAD8AAD8AAB+AAB+AAA/AAA/AAA/gAAfgAAfgAAfwAAPwAAPwAAPwAAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAPwAAPwAAPwAAfwAAfgAAfgAA/gAA/AAA/AAB+AAB+AAD8AAD8AAH4AA'),
+        42: (21, 0, 8, 21, 30, 'AHAAAHAAAHAAIHAgOHDgfnPwP//gD/+AA/4AAfwAB/4AD/+AP//gfnPwOHDgIHAgAHAAAHAAAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+        43: (34, 0, 13, 34, 25, 'AAPgAAAAA+AAAAAD4AAAAAPgAAAAA+AAAAAD4AAAAAPgAAAAA+AAAAAD4AAAAAPgAAAP///4AA////gAD///+AAP///4AA////gAAAPgAAAAA+AAAAAD4AAAAAPgAAAAA+AAAAAD4AAAAAPgAAAAA+AAAAAD4AAAAAPgAAA='),
+        44: (15, 0, 30, 15, 13, 'D+AP4A/gD+AP4A/gD+APwB+AH4AfAB4APgA='),
+        45: (17, 0, 24, 17, 14, 'P/wAP/wAP/wAP/wAP/wAP/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+        46: (15, 0, 30, 15, 8, 'D+AP4A/gD+AP4A/gD+AP4A=='),
+        47: (15, 0, 9, 15, 33, 'ADwAPAB8AHwAeAB4APgA8ADwAfAB4AHgA+ADwAPAB8AHgAeAB4APgA8ADwAfAB4AHgA+ADwAPAB8AHgAeAD4APAA'),
+        48: (28, 0, 8, 28, 30, 'AD+AAAD/8AAD//gAB//8AAf//gAP8P8AD+B/AB/Af4AfwD+AH8A/gD/AP8A/wD/AP8A/wD+AP8A/gD/AP4A/wD+AP8A/wD/AP8A/wD/AP8AfwD+AH8A/gB/Af4AP4H8AD/D/AAf//gAH//wAA//4AAD/8AAAP4AA'),
+        49: (28, 0, 9, 28, 29, 'AP/AAAf/wAAH/8AAB//AAAf/wAAHH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAB///gAf//4AH//+AB///gAf//4A='),
+        50: (28, 0, 8, 28, 30, 'AP+AAAf/8AAf//gAH//8AB///gAfg/8AHAH/ABAA/wAAAP8AAAB/AAAA/wAAAP8AAAD+AAAB/gAAA/wAAAf4AAAP8AAAH+AAAH/AAAD/gAAB/wAAA/wAAAf4AAAP8AAAH///AB///wAf//8AH///AB///wAf//8A'),
+        51: (28, 0, 8, 28, 30, 'Af/AAA//8AAP//wAD//+AA///gAPA/8ACAD/AAAA/wAAAP8AAAD/AAAA/gAAA/4AAP/8AAD/8AAA//gAAP/8AAD//gAAA/8AAAD/AAAAfwAAAH+AAAB/gAAAf4AQAP8AHgP/AB///gAf//4AH//8AB//8AAD/4AA'),
+        52: (28, 0, 9, 28, 29, 'AAf8AAAP/AAAD/wAAB/8AAA//AAAP/wAAH/8AAD9/AAA+fwAAfH8AAPx/AAH4fwAB8H8AA/B/AAfgfwAHwH8AD8B/AA+AfwAP///wD///8A////AP///wD///8AAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AA='),
+        53: (28, 0, 9, 28, 29, 'D//+AA///gAP//4AD//+AA///gAP//4AD8AAAA/AAAAPwAAAD//AAA//8AAP//wAD//+AA///wAPA/8ACAD/AAAAf4AAAH+AAAB/gAAAf4AAAH+AEAB/gBwA/wAfg/8AH//+AB///gAf//wAD//wAAD/gAA='),
+        54: (28, 0, 8, 28, 30, 'AA/wAAB//gAA//8AAf//AAP//wAH/A8AD/ABAA/gAAAP4AAAH8AAAB/H4AAf//gAH//+AB///wAf//8AP/B/gB/gP4Af4D+AH+A/wB/gP8Af4D/AH+A/wA/gP4AP4D+AB/B/gAf//wAD//4AAf/8AAD/+AAAH8AA'),
+        55: (28, 0, 9, 28, 29, 'H///gB///4Af//+AH///gB///4Af//8AAAD/AAAA/gAAAP4AAAH8AAAB/AAAA/gAAAP4AAAH8AAAB/AAAA/gAAAP4AAAH+AAAB/AAAA/wAAAP4AAAH+AAAB/AAAAfwAAAP4AAAD+AAAB/AAAAfwAAAP8AAA='),
+        56: (28, 0, 8, 28, 30, 'AH/gAAH/+AAH//4AD//+AA///wAf8P8AH+B/gB/Af4AfwD+AH8B/gA/gfwAP8P8AB//+AAP/+AAA//AAA//8AA///gAP8P8AH8B/gB/AP4AfwD+AP8A/gB/AP4AfwD+AH/D/gB///wAP//8AB//+AAP/+AAAf+AA'),
+        57: (28, 0, 8, 28, 30, 'AD+AAAH/4AAD//gAB//8AA///gAf4f4AH8D/AD/AfwA/gH8AP4B/gD+Af4A/gH+AP8B/gB/A/4Af4f+AH///gA///4AH//+AA/+/gAB+P4AAAD8AAAB/AAAAfwAIAP4ADgP+AA///AAP//gAD//wAAf/wAAA/wAA'),
+        58: (16, 0, 16, 16, 22, 'D/AP8A/wD/AP8A/wD/AP8AAAAAAAAAAAAAAAAA/wD/AP8A/wD/AP8A/wD/A='),
+        59: (16, 0, 16, 16, 27, 'D/AP8A/wD/AP8A/wD/AP8AAAAAAAAAAAAAAAAA/wD/AP8A/wD/AP8A/gD8APwB+AHwAfAB4A'),
+        60: (34, 0, 14, 34, 24, 'AAAACAAAAAB4AAAAA/gAAAAP+AAAAH/4AAAD//AAAA//gAAAf/wAAAP/4AAAD/8AAAAP+AAAAA/gAAAAD/gAAAAP/wAAAAP/4AAAAH/8AAAAD/+AAAAD//AAAAB/+AAAAA/4AAAAA/gAAAAAeAAAAAAIAAAAAAAA'),
+        61: (34, 0, 19, 34, 19, 'D///+AAP///4AA////gAD///+AAP///4AAAAAAAAAAAAAAAAAAAAAAAAAAAAD///+AAP///4AA////gAD///+AAP///4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='),
+        62: (34, 0, 14, 34, 24, 'DAAAAAAPAAAAAA/gAAAAD/wAAAAP/4AAAAP/4AAAAH/8AAAAD/+AAAAD/+AAAAB/+AAAAA/4AAAAA/gAAAAP+AAAAH/4AAAD/+AAAA//gAAAf/wAAAP/4AAAD/+AAAAP/AAAAA/gAAAADwAAAAAMAAAAAAAAAAAA'),
+        63: (23, 0, 9, 23, 29, 'Af4AD/+AH//gH//wH//wHg/wGAf4EAf4AAfwAAfwAA/wAA/gAD/gAH/AAP+AAf4AAfwAAfwAAfwAAAAAAAAAAAAAAfwAAfwAAfwAAfwAAfwAAfwAAfwA'),
+        64: (40, 0, 10, 40, 35, 'AAD/gAAAB//wAAAf//wAAD///gAA/4D/AAH8AB+AA/AAB8AD4AAD4AfAAAHwB4B88PAPAf7w8A8D//B4Hgf/8HgeB8PweB4PgfB4HA+A8HgcDwDweBwPAPB4HA8A8HgcD4Dw8B4PgfHwHgfD8+AeB///4A8D///ADwH+/wAPgHz8AAfAAAAAA+AAAAAD8AAEAAH8ABwAAP+A/gAAP//8AAAf//gAAAf/4AAAAP8AAA=='),
+        65: (31, 0, 9, 31, 29, 'AB/wAAA/+AAAP/gAAD/4AAB//AAAf/wAAH/8AAD+/gAA/v4AAfz/AAH8fwAB/H8AA/g/gAP4P4AD+D+AB/AfwAfwH8AP8B/AD///4A///+Af///wH///8B////A/gAP4P4AD+D+AA/h/gAP8fwAB/P8AAf4='),
+        66: (30, 0, 9, 30, 29, 'D//wAA///gAP//8AD///gA///8AP4H/AD+A/wA/gH8AP4B/AD+AfwA/gP8AP4H/AD///gA///wAP//4AD///gA///8AP4D/gD+AP4A/gD/AP4A/wD+AP8A/gD/AP4D/gD///4A///8AP//+AD///AA//+AA='),
+        67: (29, 0, 8, 29, 30, 'AAf8AAA//8AA///gAf//4AP//+AH/gPgD/gA4A/wACAf4AAAH+AAAB/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAB/AAAAf4AAAH+AAAA/wACAP+ADgB/4D4AP//+AB///gAP//4AA//8AAB/wA'),
+        68: (33, 0, 9, 33, 29, 'D//gAAAP//4AAA///4AAD///wAAP///gAA/gP/AAD+AP+AAP4Af8AA/gA/wAD+AD/AAP4AH+AA/gAf4AD+AB/gAP4AH+AA/gAf4AD+AB/gAP4AH+AA/gAf4AD+AB/gAP4AP8AA/gA/wAD+AH/AAP4A/4AA/gf/AAD///4AAP///AAA///4AAD//+AAAP/+AAAA=='),
+        69: (27, 0, 9, 27, 29, 'D///AA///wAP//8AD///AA///wAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD//+AA///gAP//4AD//+AA///gAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD///AA///wAP//8AD///AA///wA='),
+        70: (27, 0, 9, 27, 29, 'D///AA///wAP//8AD///AA///wAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD//+AA///gAP//4AD//+AA///gAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAA='),
+        71: (33, 0, 8, 33, 30, 'AAP/AAAAP//gAAD///gAAf//+AAD///4AAf/AfgAD/wAOAAP8AAIAB/wAAAAH+AAAAAfwAAAAD/AAAAAP8AAAAA/wAAAAD/AP/wAP8A//AA/wD/8AD/AP/wAP8A//AAfwAH8AB/gAfwAH+AB/AAP8AH8AA/4AfwAB/4D/AAD///8AAH///wAAP///AAAP//gAAAH/gAA'),
+        72: (33, 0, 9, 33, 29, 'D+AD/AAP4AP8AA/gA/wAD+AD/AAP4AP8AA/gA/wAD+AD/AAP4AP8AA/gA/wAD+AD/AAP4AP8AA/gA/wAD////AAP///8AA////wAD////AAP///8AA/gA/wAD+AD/AAP4AP8AA/gA/wAD+AD/AAP4AP8AA/gA/wAD+AD/AAP4AP8AA/gA/wAD+AD/AAP4AP8AA=='),
+        73: (15, 0, 9, 15, 29, 'D+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A=='),
+        74: (15, -3, 9, 18, 37, 'AfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAAfwAA/wAA/wAA/wAD/gAf/gAf/AAf+AAf8AAfgAA'),
+        75: (31, 0, 9, 33, 29, 'D+AD/AAP4A/4AA/gH/AAD+A/4AAP4H/AAA/g/4AAD+H/AAAP4/4AAA/n/AAAD+/4AAAP//AAAA//4AAAD//AAAAP/4AAAA//gAAAD//gAAAP//AAAA//+AAAD+/8AAAP5/4AAA/j/wAAD+H/gAAP4P/AAA/gf+AAD+A/8AAP4B/4AA/gD/wAD+AH/gAP4AP/AA=='),
+        76: (25, 0, 9, 25, 29, 'D+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD///AA///wAP//8AD///AA///wA='),
+        77: (40, 0, 9, 40, 29, 'D/gAP/AP/AA/8A/8AH/wD/4Af/AP/gB/8A//AP/wD/8A//AP/4H/8A//gf/wD++D9/AP78P38A/vw+fwD+fn5/AP5+fH8A/j/8fwD+P/x/AP4f+H8A/h/4fwD+D/B/AP4P8H8A/g/gfwD+B+B/AP4HwH8A/gAAfwD+AAB/AP4AAH8A/gAAfwD+AAB/AP4AAH8A=='),
+        78: (33, 0, 9, 33, 29, 'D/AB/AAP+AH8AA/4AfwAD/wB/AAP/AH8AA/+AfwAD/8B/AAP/wH8AA//gfwAD/+B/AAP78H8AA/vwfwAD+fh/AAP5+H8AA/j8fwAD+Px/AAP4fn8AA/h+fwAD+D9/AAP4P/8AA/gf/wAD+B//AAP4D/8AA/gP/wAD+Af/AAP4A/8AA/gD/wAD+AH/AAP4Af8AA=='),
+        79: (34, 0, 8, 34, 30, 'AAf4AAAAP/8AAAD//8AAAf//4AAD///wAAf8D/gAD/gH/AAP8AP8AB/gAf4AH+AB/gAfwAD+AD/AAP8AP8AA/wA/wAD/AD/AAP8AP8AA/wA/wAD/AD/AAP8AP8AA/wAfwAD+AB/gAf4AH+AB/gAP8AP8AA/4B/wAB/wP+AAD///wAAH//+AAAP//wAAAP/8AAAAH+AAA'),
+        80: (29, 0, 9, 29, 29, 'D//wAA///gAP//+AD///wA///8AP4D/gD+Af4A/gD+AP4A/wD+AP8A/gD/AP4A/gD+Af4A/gP+AP///AD///wA///4AP//4AD//4AA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAA='),
+        81: (34, 0, 8, 34, 36, 'AAf4AAAAP/8AAAD//8AAAf//4AAD///wAAf8D/gAD/gH/AAP8AP8AB/gAf4AH+AB/gAfwAD+AD/AAP8AP8AA/wA/wAD/AD/AAP8AP8AA/wA/wAD/AD/AAP8AP8AA/wAfwAD+AB/gAf4AH+AB/gAP8AP8AA/4B/wAB/wP+AAD///wAAH//+AAAP//wAAAP/8AAAAH/wAAAAA/gAAAAB/AAAAAD+AAAAAH8AAAAAfwAAAAA/gA'),
+        82: (31, 0, 9, 31, 29, 'D//wAA///gAP//8AD///gA///8AP4H/AD+A/wA/gH8AP4B/AD+AfwA/gH8AP4D/AD+B/gA///wAP//4AD//4AA///gAP//8AD+D/gA/gf4AP4D/AD+A/wA/gH+AP4B/gD+AP8A/gD/AP4Af4D+AH+A/gA/w='),
+        83: (29, 0, 8, 29, 30, 'AD/wAAH//wAD//8AB///AA///wAf8B8AH8ABAB/AAAAfwAAAH8AAAB/wAAAf/wAAD//wAA///AAH//8AA///AAD//4AAH/+AAAH/wAAAP8AAAD/AAAAfwBAAH8AcAD+AH8B/gB///4Af//8AH//+AAf//AAAf+AA'),
+        84: (27, 0, 9, 28, 29, '////4P///+D////g////4P///+AAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAA='),
+        85: (32, 0, 9, 32, 29, 'D+AH+A/gB/gP4Af4D+AH+A/gB/gP4Af4D+AH+A/gB/gP4Af4D+AH+A/gB/gP4Af4D+AH+A/gB/gP4Af4D+AH+A/gB/gP4Af4D+AH+A/gB/gP8Af4D/AH8A/wD/AH/B/wB///4AP//8AB//+AAH//AAAP+AA='),
+        86: (31, 0, 9, 31, 29, '/wAB/n8AAfx/gAP8P4AD+D+AA/g/wAf4H8AH8B/AD/Af4A/wD+AP4A/wH+AP8B/AB/AfwAf4P8AD+D+AA/g/gAP8f4AB/H8AAfx/AAH+/wAA/v4AAP/+AAB//AAAf/wAAH/8AAA/+AAAP/gAAD/4AAAf8AA='),
+        87: (44, 0, 9, 44, 29, 'f4A/wA/gP4A/wB/gP4A/wB/AP4A/4B/AP4B/4B/AH8B/4D/AH8B/4D+AH8B/4D+AH8D/8D+AH+D58H+AD+D58H8AD+D58H8AD+H5+H8AD/Hw+P8AB/Hw+P4AB/Hw+P4AB/Hw/P4AB/vwfP4AA/vgffwAA/vgffwAA//gf/wAA//gP/wAAf/AP/wAAf/AP/gAAf/AP/gAAf/AP/gAAP+AH/gAAP+AH/AAAP+AH/AA'),
+        88: (31, 0, 9, 31, 29, 'f4AH+D/AB/gf4A/wD+Af4A/wH+AH+D/AA/h/gAP8f4AB/v8AAP/+AAD//AAAf/wAAD/4AAA/8AAAH/AAAD/4AAB/+AAAf/wAAP/+AAH+/wAB/P8AA/x/gAf4P8AH8D/AD/Af4B/gD/A/wA/wP8AH+H+AA/w='),
+        89: (29, -1, 9, 31, 29, 'f4AD/D/AB/g/wA/4H+AP8A/wH+AP8B/gB/g/wAP8f4AD/H+AAf7/AAD//gAA//4AAH/8AAA/+AAAP/gAAB/wAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AA='),
+        90: (29, 0, 9, 29, 29, 'P///4D///+A////gP///4D///+AAAH/AAAD/gAAB/wAAAf8AAAP+AAAH/AAAD/gAAB/wAAAf8AAAP+AAAH/AAAD/gAAB/wAAAf8AAAP+AAAH/AAAD/gAAB/wAAA/8AAAP///4D///+A////gP///4D///+A='),
+        91: (18, 0, 8, 18, 36, 'H/8AH/8AH/8AH/8AH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH/8AH/8AH/8AH/8A'),
+        92: (15, 0, 9, 15, 33, '8AD4AHgAeAB8ADwAPAA+AB4AHgAfAA8ADwAPgAeAB4AHgAfAA8ADwAPgAeAB4AHwAPAA8AD4AHgAeAB8AHwAPAA8'),
+        93: (18, 0, 8, 18, 36, 'H/4AH/4AH/4AH/4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AAP4AH/4AH/4AH/4AH/4A'),
+        94: (34, 0, 9, 34, 29, 'AAPwAAAAB/gAAAAP+AAAAB/8AAAAP/4AAAB/fwAAAP4fgAAB+A/AAAPwB+AAB+AB8AAHgAD4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='),
+        95: (20, 0, 38, 20, 9, 'AAAAAAAAAAAAAAAAAAAA///w///w///w///w'),
+        96: (20, 0, 6, 20, 32, 'PwAAH4AAD4AAB8AAA+AAAPAAAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+        97: (27, 0, 15, 27, 23, 'AP+AAAf/8AAP//gAD//8AA///gAOAf4ACAD/AAAAfwAA//8AB///AA///wAf//8AP8B/AD+AfwA/gH8AP4D/AD+B/wA/w/8AP///AB///wAf/38AB/x/AAPwfwA='),
+        98: (29, 0, 8, 29, 30, 'H8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/B8AAfx/wAH8//AB///wAf//+AH/h/wB/wP8Af4B/AH+Af4B/gH+AfwA/gH8AP4B/AD+Af4B/gH+Af4B/gH8Af8D/AH/h/wB///4Af//8AH///AB/P/AAfw/AA'),
+        99: (24, 0, 15, 24, 23, 'AD/gAf/4A//4B//4D//4H/A4H+AIP8AAP8AAP4AAP4AAP4AAP4AAP4AAP8AAP8AAH+AIH/A4D//4B//4A//4Af/4AD/g'),
+        100: (29, 0, 8, 29, 30, 'AAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gAD8P4AD/z+AB/+/gA///4AP//+AH/D/gB/Af4A/wD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD/AP4AfwH+AH/D/gA///4AP//+AB/+/gAP/P4AA/D+A'),
+        101: (27, 0, 15, 27, 23, 'AD+AAAH/8AAD//gAB//8AA///gAf4P8AH8B/AD+AP4A/gD+AP///gD///4A///+AP///gD+AAAA/gAAAP8ABAB/ABwAf8D8AD///AAf//wAD//4AAf/4AAA/wAA='),
+        102: (17, 0, 8, 18, 30, 'AH/AAf/AB//AB//AB//AD/AAD+AAD+AAf/+Af/+Af/+Af/+Af/+AD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AA'),
+        103: (29, 0, 15, 29, 32, 'APwAAAP/P4AH/7+AD///gA///4Af8P+AH8B/gD/Af4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP8B/gB/Af4Af8P+AD///gA///4AH/7+AA/8/gAD8P4AAAD+AAAB/gAAAfwAPAf8AD//+AA///AAP//gAA//wAAD/gAA='),
+        104: (28, 0, 8, 28, 30, 'H8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/B+AAfx/wAH8/+AB///wAf//+AH/h/gB/wP4Af4D+AH+A/gB/gP4AfwD+AH8A/gB/AP4AfwD+AH8A/gB/AP4AfwD+AH8A/gB/AP4AfwD+AH8A/gB/AP4AfwD+A'),
+        105: (14, 0, 8, 14, 30, 'H8AfwB/AH8AfwAAAAAAAAB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/A'),
+        106: (14, -2, 8, 16, 39, 'B/AH8AfwB/AH8AAAAAAAAAfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwD/B/4H/gf8B/gH4A'),
+        107: (27, 0, 8, 28, 30, 'H8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwD/AH8B/gB/A/wAfwf4AH8P8AB/H+AAfz/AAH//gAB//wAAf/wAAH/8AAB//gAAf/8AAH9/gAB/P8AAfx/gAH8P8AB/B/gAfwP8AH8B/gB/Af8AfwD/g'),
+        108: (14, 0, 8, 14, 30, 'H8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/AH8AfwB/A'),
+        109: (42, 0, 15, 42, 23, 'AAPwD8AAH8f4P/AAH8/8f/gAH//+//gAH/////wAH/j/4/wAH/B/wfwAH+B/gfwAH+B/gfwAH+B/gP4AH8B/gP4AH8B/Af4AH8B/Af4AH8B/Af4AH8B/Af4AH8B/Af4AH8B/Af4AH8B/Af4AH8B/Af4AH8B/Af4AH8B/Af4AH8B/Af4AH8B/Af4A'),
+        110: (28, 0, 15, 28, 23, 'AAH4AB/H/AAfz/4AH///AB///4Af+H+AH/A/gB/gP4Af4D+AH+A/gB/AP4AfwD+AH8A/gB/AP4AfwD+AH8A/gB/AP4AfwD+AH8A/gB/AP4AfwD+AH8A/gB/AP4A='),
+        111: (27, 0, 15, 27, 23, 'AD/AAAH/8AAD//wAB//+AA///wAf8P8AH8B/gD/AP4A/gD+AP4A/wD+AP8A/gD/AP4A/wD+AP8A/gD+AP8A/gB/Af4Af8P8AD///AAf//gAD//wAAf/wAAA/wAA='),
+        112: (29, 0, 15, 29, 31, 'AAHwAB/H/AAfz/8AH///AB///4Af+H/AH/A/wB/gH8Af4B/gH+Af4B/AD+AfwA/gH8AP4B/gH+Af4B/gH+AfwB/wP8Af+H/AH///gB///wAfz/8AH8f8AB/B8AAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAA=='),
+        113: (29, 0, 15, 29, 31, 'APwAAAP/P4AH/7+AD///gA///4Af8P+AH8B/gD/AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP4A/gD+AP8A/gB/Af4Af8P+AD///gA///4AH/7+AA/8/gAD8P4AAAD+AAAA/gAAAP4AAAD+AAAA/gAAAP4AAAD+AAAA/gA=='),
+        114: (20, 0, 15, 20, 23, 'AAHgH8fwH8/wH//wH//wH/wQH/AAH+AAH+AAH+AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AAH8AA'),
+        115: (24, 0, 15, 24, 23, 'Af8AB//gD//wH//wP//wP4DwPwAQPwAAP8AAH/4AH//gD//wA//4AH/8AAP8AAH8MAH8PgP8P//4P//4P//wD//gAf8A'),
+        116: (19, 0, 10, 19, 28, 'D+AAD+AAD+AAD+AAD+AAD+AAf//Af//Af//Af//Af//AD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD+AAD/AAD//AB//AB//AA//AAP/A'),
+        117: (28, 0, 16, 28, 22, 'H8A/gB/AP4AfwD+AH8A/gB/AP4AfwD+AH8A/gB/AP4AfwD+AH8A/gB/AP4AfwD+AH8A/gB/AP4AfwH+AH+B/gA/x/4AP//+AD///gAf/v4AD/z+AAPw/gA=='),
+        118: (26, 0, 16, 26, 22, 'fwA/gH8AP4A/AD+AP4B/AD+AfwAfwH4AH8D+AA/A/gAP4fwAD+H8AAfh+AAH8/gAB/P4AAPz8AAD//AAAf/gAAH/4AAB/+AAAP/AAAD/wAAAf4AAAH+AAA=='),
+        119: (37, 0, 16, 37, 22, 'PwH8B+A/gfwP4D+B/A/gP4H8D+Afg/4PwB/D/h/AH8P+H8Afw/4fwA/H3h+AD+ffP4AP598/gA/njz+AB+ePPwAH74//AAf/j/8AB/8H/wAD/wf+AAP/B/4AA/8H/gAB/gP8AAH+A/wAAf4D/AA='),
+        120: (26, 0, 16, 26, 22, 'f4B/AD+A/wAfwP4AD+H8AA/j+AAH8/gAA//wAAH/4AAB/+AAAP/AAAB/gAAA/8AAAP/AAAH/4AAD//AAB//wAAfz+AAP4fwAH8H+AD/A/gA/gH8AfwB/gA=='),
+        121: (26, 0, 16, 26, 31, 'fwA/gH8AP4A/AD8AP4B/AD+AfwAfwH4AH8D+AA/A/AAP4PwAB+H8AAfx+AAH8fgAA/P4AAP78AAB//AAAf/gAAD/4AAA/+AAAP/AAAB/wAAAf8AAAD+AAAA/gAAAPwAAAD8AAAB/AAAP/gAAD/4AAA/8AAAP+AAAD+AAAA=='),
+        122: (23, 0, 16, 23, 22, 'P//4P//4P//4P//4P//4AAf4AA/wAB/gAD/AAH+AAP8AAf4AA/wAB/gAD/AAH+AAP8AAP//4P//4P//4P//4P//4'),
+        123: (28, 0, 8, 28, 37, 'AAH+AAAH/gAAD/4AAA/+AAAf4AAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAP4AAAH+AAAf/AAAH/gAAB/4AAAf/gAAAf4AAAD+AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH8AAAB/AAAAfwAAAH+AAAA/+AAAP/gAAB/4AAAH+AA=='),
+        124: (15, 0, 7, 15, 40, 'B8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8A='),
+        125: (28, 0, 8, 28, 37, 'B/gAAAf+AAAH/wAAB/+AAAB/gAAAP4AAAB+AAAAfgAAAH4AAAB+AAAAfgAAAH4AAAB/AAAAfwAAAH8AAAB/gAAAP/gAAB/4AAAf+AAAP/gAAH+AAAB/AAAAfwAAAH8AAAB+AAAAfgAAAH4AAAB+AAAAfgAAAH4AAAB+AAAA/gAAAf4AAB/+AAAf/AAAH/gAAB/gAAA=='),
+        126: (34, 0, 21, 34, 17, 'AAAAAAAAfgAIAAH/gBgAB//weAAP///4AA////gAD4P/8AAOAP/gAAgAH4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='),
+        8212: (40, 0, 25, 40, 13, 'P/////w//////D/////8P/////w//////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='),
+        183: (15, 0, 20, 15, 18, 'D+AP4A/gD+AP4A/gD+AP4AAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+    },
+    28: {  # ascent 26, descent 7
+        32: (10, 0, 26, 0, 0, ''),
+        33: (13, 0, 6, 13, 20, 'D4APgA+AD4APgA+AD4APgA+AD4APAA8ABwAAAAAAD4APgA+AD4APgA=='),
+        34: (15, 0, 6, 15, 20, 'HHAccBxwHHAccBxwHHAccAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='),
+        35: (23, 0, 6, 23, 20, 'AHDgAHDgAHHAAPHAAOHAH//8H//8H//8AcOAAcOAAccAAccAP//wP//wP//wA44ABw4ABw4ABxwABxwA'),
+        36: (19, 0, 5, 19, 25, 'AGAAAGAAAGAAA/8AD/8AH/8AHmMAPmAAPmAAP+AAH/gAH/8AD/+AA/+AAH+AAGfAAGeAMGeAP/+AP/8AP/wAAGAAAGAAAGAAAGAA'),
+        37: (28, 0, 6, 28, 20, 'D4AcAD/AOAA54HAAePBwAHDw4ABw8cAAcPHAAHjzgAA554AAP8cfAA+OP8AADnnAABxx4AA48OAAOPDgAHDw4ADgceAA4HnAAcA/wAOAHwA='),
+        38: (24, 0, 6, 24, 20, 'AP4AA/8AB/8AB8MAB8AAB8AAB+AAA+AAD/A8H/g8H3w8Pj58Pj/4PB/4Pg/wPgfgPwfwH//4D//8A/x+'),
+        39: (9, 0, 6, 9, 20, 'HAAcABwAHAAcABwAHAAcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='),
+        40: (13, 0, 5, 13, 25, 'A8ADwAeAB4APgA8AHwAfAB4AHgAeAD4APgA+AB4AHgAeAB8AHwAPAA+AB4AHgAPAA8A='),
+        41: (13, 0, 5, 13, 25, 'PgAeAB8ADwAPgAeAB4AHwAfAA8ADwAPAA8ADwAPAA8AHwAfAB4AHgA+ADwAfAB4APgA='),
+        42: (15, 0, 6, 15, 20, 'AwADAEMIczx/+B/gB8Af4H/4czxDCAMAAwAAAAAAAAAAAAAAAAAAAA=='),
+        43: (23, 0, 9, 23, 17, 'ADgAADgAADgAADgAADgAADgAADgAH//4H//4H//4ADgAADgAADgAADgAADgAADgAADgA'),
+        44: (11, 0, 21, 11, 9, 'HwAfAB8AHwAeAD4APAA4ADgA'),
+        45: (12, 0, 16, 12, 10, 'P8A/wD/AP8AAAAAAAAAAAAAAAAA='),
+        46: (11, 0, 21, 11, 5, 'HwAfAB8AHwAfAA=='),
+        47: (10, 0, 6, 11, 23, 'AcABwAOAA4ADgAeABwAHAAcADgAOAA4AHAAcABwAOAA4ADgAcABwAHAA4ADgAA=='),
+        48: (19, 0, 6, 19, 20, 'AfgAB/4AD/8AH/+APx+APg+APgfAPgfAfgfAfgfAfgfAfgfAPgfAPgfAPg+APx+AH/+AD/8AB/4AAfgA'),
+        49: (19, 0, 6, 19, 20, 'A/gAH/gAH/gAH/gAHPgAAPgAAPgAAPgAAPgAAPgAAPgAAPgAAPgAAPgAAPgAAPgAH//AH//AH//AH//A'),
+        50: (19, 0, 6, 19, 20, 'B/gAP/4AP/8AP/8AMD+AAB+AAA+AAB+AAB8AAD4AAHwAAfgAA/AAB+AAD8AAH4AAP/+AP/+AP/+AP/+A'),
+        51: (19, 0, 6, 19, 20, 'B/gAH/4AH/8AH/+AED+AAB+AAB+AAD8AB/4AB/wAB/4AB/8AAB+AAA+AAA+AMB+AP/+AP/8AP/4AD/gA'),
+        52: (19, 0, 6, 19, 20, 'AH4AAP4AAP4AAf4AA/4AA74AB74ADz4AHj4AHD4APD4AeD4Af//Af//Af//Af//AAD4AAD4AAD4AAD4A'),
+        53: (19, 0, 6, 19, 20, 'H/8AH/8AH/8AH/8AHgAAHgAAH/gAH/4AH/8AH/+AGD+AAA+AAA+AAA+AAA+AMD+AP/+AP/8AP/4AD/gA'),
+        54: (19, 0, 6, 19, 20, 'AP4AA/+AB/+AD/+AH4GAHwAAPnwAP/8AP/+AP/+APw/APwfAPgfAPgfAPwfAHw+AH/+AD/8AB/4AAfgA'),
+        55: (19, 0, 6, 19, 20, 'P/+AP/+AP/+AP/+AAB+AAB8AAB8AAD4AAD4AAHwAAHwAAPgAAPgAAfAAAfAAA+AAA+AAB8AAB8AAD8AA'),
+        56: (19, 0, 6, 19, 20, 'A/wAD/8AH/8AP/+APw+APg+APg+AHw+AH/8AB/wAD/4AH/+APw+APgfAPgfAPw/AP/+AH/+AD/8AA/wA'),
+        57: (19, 0, 6, 19, 20, 'A/AAD/wAH/4AP/8APx+APg+APg+Afg/APg/APx/AP//AH//AD/+AA++AAA+AED8AH/8AH/4AH/wAB+AA'),
+        58: (11, 0, 11, 11, 15, 'HwAfAB8AHwAfAAAAAAAAAAAAAAAfAB8AHwAfAB8A'),
+        59: (11, 0, 11, 11, 19, 'HwAfAB8AHwAfAAAAAAAAAAAAAAAfAB8AHwAfAB8AHgA8ADwAOAA='),
+        60: (23, 0, 9, 23, 17, 'AAAQAAD4AAP4AB/wAP+AB/4AH/AAH4AAH4AAH/AAB/4AAP+AAB/wAAP4AAD4AAAQAAAA'),
+        61: (23, 0, 13, 23, 13, 'H//4H//4H//4AAAAAAAAAAAAH//4H//4H//4AAAAAAAAAAAAAAAA'),
+        62: (23, 0, 9, 23, 17, 'EAAAHgAAH8AAH/gAA/4AAH/AAA/wAAH4AAH4AA/wAH/AA/4AH/gAH8AAHgAAEAAAAAAA'),
+        63: (16, 0, 6, 16, 20, 'P+A/+D/8MHwAfAB8AHwB+APwA+AHwAfAB8AAAAAAB8AHwAfAB8AHwA=='),
+        64: (28, 0, 6, 28, 25, 'AB/AAAD/8AAB//wAA+B+AAeADwAPAAcAHh5zgBw/cYAYf/HAOHnxwDjw8cAw4HHAMOBxwDjgccA48POAOHn3gDh//wAcP34AHh54AA8AAAAHgAgAA+B8AAH/+AAA//AAAB+AAA=='),
+        65: (22, 0, 6, 22, 20, 'APwAAf4AAf4AA/4AA/8AA98AB88AB8+AD4+AD4fAD4fAHwfAH//gH//gP//gP//wfgHwfAH4fAD4/AD4'),
+        66: (21, 0, 6, 21, 20, 'H/4AH/+AH//AH//AHw/AHwfgHwfAHwfAH//AH/8AH/+AH//AHwfgHwPgHwPgHwfgH//gH//AH//AH/4A'),
+        67: (21, 0, 6, 21, 20, 'AH8AA//AB//gD//gH8DgP4AgPwAAPgAAPgAAfgAAfgAAPgAAPgAAPwAAP4AgH8DgD//gB//gA//AAH8A'),
+        68: (23, 0, 6, 23, 20, 'H/wAH/+AH//AH//wHwfwHwH4HwH4HwD4HwD8HwD8HwD8HwD8HwD8HwH4HwH4HwfwH//wH//AH/+AH/wA'),
+        69: (19, 0, 6, 19, 20, 'H/+AH/+AH/+AH/+AHwAAHwAAHwAAHwAAH/8AH/8AH/8AH/8AHwAAHwAAHwAAHwAAH/+AH/+AH/+AH/+A'),
+        70: (19, 0, 6, 19, 20, 'H/+AH/+AH/+AH/+AHwAAHwAAHwAAHwAAH/8AH/8AH/8AH/8AHwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAA'),
+        71: (23, 0, 6, 23, 20, 'AH+AA//wB//wD//wH8BwP4AQPwAAPgAAPgAAfgf4fgf4Pgf4Pgf4PwD4P4D4H8D4D//4B//4A//wAH+A'),
+        72: (23, 0, 6, 23, 20, 'HwD4HwD4HwD4HwD4HwD4HwD4HwD4HwD4H//4H//4H//4H//4HwD4HwD4HwD4HwD4HwD4HwD4HwD4HwD4'),
+        73: (10, 0, 6, 10, 20, 'HwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAA=='),
+        74: (10, -2, 6, 12, 26, 'B8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8APwA/AH4D/gP8A/gD4AA=='),
+        75: (22, 0, 6, 23, 20, 'HwH4HwPwHwfgHw/AHx+AHz8AH34AH/wAH/gAH/AAH/gAH/wAH/4AH38AHz+AHx/AHw/gHwfwHwP4HwH8'),
+        76: (18, 0, 6, 18, 20, 'HwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAAHwAAH/+AH/+AH/+AH/+A'),
+        77: (28, 0, 6, 28, 20, 'H4A/gB/AP4AfwH+AH+B/gB/gf4Af8P+AH/D/gB9574Afee+AH3vPgB8/z4AfP8+AHx+PgB8fj4AfDw+AHw8PgB8AD4AfAA+AHwAPgB8AD4A='),
+        78: (23, 0, 6, 23, 20, 'H4D4H4D4H8D4H8D4H+D4H+D4H/D4H/j4H3j4H3z4Hzz4Hz74Hx74Hx/4Hw/4Hwf4Hwf4HwP4HwP4HwH4'),
+        79: (24, 0, 6, 24, 20, 'AP8AA//AD//gH//wH8P4PwD8PwD8PgB8PgB8fgB8fgB8PgB8PgB8PwD8PwD8H8P4H//wD//gA//AAP8A'),
+        80: (21, 0, 6, 21, 20, 'H/4AH/+AH//AH//gHwfgHwPgHwPgHwPgHwfgH//gH//AH/+AH/4AHwAAHwAAHwAAHwAAHwAAHwAAHwAA'),
+        81: (24, 0, 6, 24, 24, 'AP8AA//AD//gH//wH8P4PwD8PwD8PgB8PgB8fgB8fgB8PgB8PgB8PwD8PwD4H8P4H//wD//gA//AAP+AAAfAAAPgAAHwAAHw'),
+        82: (22, 0, 6, 22, 20, 'H/4AH/+AH//AH//AHw/AHwfAHwfAHwfAHw/AH/+AH/8AH/8AH/+AHx+AHw/AHwfgHwfgHwPwHwHwHwH4'),
+        83: (20, 0, 6, 20, 20, 'A/wAD/+AH/+AH/+APweAPgCAPgAAPwAAH/AAH/4AB/+AAP/AAA/AAAfAIAfAPA/AP//AP/+AH/8AA/wA'),
+        84: (19, 0, 6, 19, 20, '///g///g///g///gAfAAAfAAAfAAAfAAAfAAAfAAAfAAAfAAAfAAAfAAAfAAAfAAAfAAAfAAAfAAAfAA'),
+        85: (23, 0, 6, 23, 20, 'HwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwHwPwH4fwD//gD//AA/+AAP4A'),
+        86: (22, 0, 6, 22, 20, '/AD4fAD4fAH4fgHwPgHwPgPgHwPgHwPgH4fAD4fAD4/AD8+AB8+AB98AA/8AA/8AA/4AAf4AAf4AAPwA'),
+        87: (31, 0, 6, 31, 20, 'fAfAfHwHwHx8D+D4Pg/g+D4P4Pg+D+D4Ph7x8B8e8fAfHvHwHxxx8B88e+APvHvgD7x74A/4P+AP+D/gB/g/wAf4P8AH8B/AB/AfwAPwH4A='),
+        88: (22, 0, 6, 22, 20, 'fgHwPgPwHwPgH4fAD4/AB9+AB/8AA/8AAf4AAfwAAfwAA/4AA/8AB/+AD8+AD4/AHwfgPwPgPgPwfAH4'),
+        89: (20, -1, 6, 22, 20, 'fgH4PgH4PwPwH4fgD4fgD8/AB++AA/+AA/8AAf4AAPwAAPwAAPwAAPwAAPwAAPwAAPwAAPwAAPwAAPwA'),
+        90: (20, 0, 6, 20, 20, 'P//gP//gP//gP//AAA/AAB+AAD8AAH4AAPwAAPgAAfAAA/AAB+AAD8AAH4AAPwAAP//gf//gf//gf//g'),
+        91: (13, 0, 5, 13, 25, 'P+A/4D/gPgA+AD4APgA+AD4APgA+AD4APgA+AD4APgA+AD4APgA+AD4APgA/4D/gP+A='),
+        92: (10, 0, 6, 11, 23, '4ADgAHAAcABwADgAOAA4ABwAHAAcAA4ADgAOAAcABwAHAAeAA4ADgAOAAcABwA=='),
+        93: (13, 0, 5, 13, 25, 'P8A/wD/AA8ADwAPAA8ADwAPAA8ADwAPAA8ADwAPAA8ADwAPAA8ADwAPAA8A/wD/AP8A='),
+        94: (23, 0, 6, 23, 20, 'ADwAAH4AAP8AAf+AA+eAB4PADwHgHgBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+        95: (14, 0, 26, 14, 7, 'AAAAAAAAAAD//P/8//w='),
+        96: (14, 0, 4, 14, 22, 'PAAcAA4ABwADgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='),
+        97: (19, 0, 11, 19, 15, 'B/gAH/4AH/8AEB8AAA+AB/+AH/+AP/+Afg+AfA+AfB+Afj+AP/+AH++AD4+A'),
+        98: (20, 0, 5, 20, 21, 'PgAAPgAAPgAAPgAAPgAAPgAAPj4APn8AP/+AP4/APwfAPgfgPgPgPgPgPgPgPgfgPwfAP4/AP/+APn8APj4A'),
+        99: (17, 0, 11, 17, 15, 'A/gAD/4AH/4APwIAPgAAfgAAfAAAfAAAfAAAfgAAPgAAPwYAH/4AD/4AA/gA'),
+        100: (20, 0, 5, 20, 21, 'AAfAAAfAAAfAAAfAAAfAAAfAB8fAD+fAH//APx/APg/AfgfAfAfAfAfAfAfAfgfAPg/APx/AH//AD+fAB8fA'),
+        101: (19, 0, 11, 19, 15, 'A/gAD/4AH/8APx+APg+AfAeAf//Af//Af//AfAAAPgAAPwGAH/+AD/+AA/4A'),
+        102: (12, 0, 5, 13, 21, 'A/AP8B/wHwAfAB8Af/B/8H/wHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8A'),
+        103: (20, 0, 11, 20, 21, 'B8fAD+fAH//APx/APg/Afg/AfAfAfAfAfAfAfg/APg/APx/AH//AD+fAB8fAAA+AAA+AGB+AH/8AH/4AB/AA'),
+        104: (20, 0, 5, 20, 21, 'PgAAPgAAPgAAPgAAPgAAPgAAPj4APn8AP/+AP4+APwfAPwfAPgfAPgfAPgfAPgfAPgfAPgfAPgfAPgfAPgfA'),
+        105: (10, 0, 5, 10, 21, 'PgA+AD4APgAAAAAAPgA+AD4APgA+AD4APgA+AD4APgA+AD4APgA+AD4A'),
+        106: (10, -1, 5, 11, 27, 'HwAfAB8AHwAAAAAAHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8AHwAfAB8A/gD+APgA'),
+        107: (19, 0, 5, 20, 21, 'PgAAPgAAPgAAPgAAPgAAPgAAPg/APh+APj8APn4APvwAP/gAP/AAP/AAP/gAPvwAPn4APj8APh+APg/APgfg'),
+        108: (10, 0, 5, 10, 21, 'PgA+AD4APgA+AD4APgA+AD4APgA+AD4APgA+AD4APgA+AD4APgA+AD4A'),
+        109: (29, 0, 11, 29, 15, 'PjwfAD7+P8A//3/AP5/n4D8Pw+A+D4PgPg+D4D4Pg+A+D4PgPg+D4D4Pg+A+D4PgPg+D4D4Pg+A+D4Pg'),
+        110: (20, 0, 11, 20, 15, 'Pj4APn8AP/+AP4+APwfAPwfAPgfAPgfAPgfAPgfAPgfAPgfAPgfAPgfAPgfA'),
+        111: (19, 0, 11, 19, 15, 'A/gAD/4AH/8APx+APg+AfgfAfAfAfAfAfAfAfgfAPg+APx+AH/8AD/4AA/gA'),
+        112: (20, 0, 11, 20, 21, 'Pj4APn8AP/+AP4/APwfAPgfgPgPgPgPgPgPgPgfgPwfAP4/AP/+APn8APj4APgAAPgAAPgAAPgAAPgAAPgAA'),
+        113: (20, 0, 11, 20, 21, 'B8fAD+fAH//APx/APg/AfgfAfAfAfAfAfAfAfgfAPg/APx/AH//AD+fAB8fAAAfAAAfAAAfAAAfAAAfAAAfA'),
+        114: (14, 0, 11, 14, 15, 'Pjw+/D/8P/w/hD8APwA+AD4APgA+AD4APgA+AD4A'),
+        115: (17, 0, 11, 17, 15, 'B/AAH/wAP/wAPAwAfAAAPwAAP/gAH/wAD/4AAH4AAB4AMD4AP/4AP/wAD/AA'),
+        116: (13, 0, 6, 13, 20, 'HwAfAB8AHwAfAP/4//j/+B8AHwAfAB8AHwAfAB8AHwAfAB/wD/AH8A=='),
+        117: (20, 0, 11, 20, 15, 'PgfAPgfAPgfAPgfAPgfAPgfAPgfAPgfAPgfAPg/APg/APx/AH//AD+fAB8fA'),
+        118: (18, 0, 11, 18, 15, 'eAfAfA+AfA+APg8APh8AHh8AHx4AHz4ADzwAD/wAB/wAB/gAB/gAA/AAA/AA'),
+        119: (26, 0, 11, 26, 15, 'fB4PgHweDwA8Pw8APj8fAD4/HwA+Px4AHneeAB9zvgAfc74AD/P8AA/j/AAP4fwAD+H8AAfh+AAHwfgA'),
+        120: (18, 0, 11, 18, 15, 'fA+APh8AHz4AHz4AD/wAB/gAA/AAA/AAB/gAB/wAD/wAHz4APh8APh+AfA+A'),
+        121: (18, 0, 11, 18, 21, 'eAfAfA+AfA+APg8APh8AHh8AHx4ADz4AD7wAD/wAB/wAB/gAA/gAA/gAAfAAAfAAAeAAA+AAH8AAH8AAHwAA'),
+        122: (16, 0, 11, 16, 15, 'P/4//j/+AH4A/AH4A/AH4A/AH4A/AH4Af/5//n/+'),
+        123: (20, 0, 5, 20, 26, 'AD8AAH8AAP8AAPgAAPgAAPAAAPAAAPAAAPAAAPAAAfAAAfAAH+AAH8AAH/AAAfAAAfAAAPAAAPAAAPAAAPAAAPgAAPgAAP8AAH8AAD8A'),
+        124: (10, 0, 5, 10, 28, 'DgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgA='),
+        125: (20, 0, 5, 20, 26, 'H8AAH+AAH/AAAfAAAfAAAfAAAPAAAPAAAPAAAPAAAPgAAPgAAH8AAD8AAP8AAPgAAPAAAPAAAPAAAPAAAPAAAfAAAfAAH/AAH+AAH8AA'),
+        126: (23, 0, 14, 23, 12, 'AAAAA+AQD/g4H//wHD/wEAfAAAAAAAAAAAAAAAAAAAAAAAAA'),
+        8212: (28, 0, 16, 28, 10, 'f///4H///+B////gf///4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='),
+        183: (11, 0, 14, 11, 12, 'HwAfAB8AHwAfAAAAAAAAAAAAAAAAAAAA'),
+    },
+}
+
+# Baseline offset per font size: distance from the ascender line to the
+# baseline, as reported by the font's metrics at build time.
+ASCENT = {40: 38, 28: 26}
 
 
-def build_glyphs():
-    raw = base64.b64decode(FONT_B64)
-    assert len(CHARSET) == 89, len(CHARSET)
-    total = len(CHARSET) * CELL_W * CELL_H
-    assert len(raw) * 8 >= total
-    glyphs = []
-    for g in range(len(CHARSET)):
-        pts = []
-        base = g * CELL_W * CELL_H
-        for r in range(CELL_H):
-            for c in range(CELL_W):
-                i = base + r * CELL_W + c
-                if (raw[i // 8] >> (7 - i % 8)) & 1:
-                    pts.append((c, r))
-        glyphs.append(pts)
-    return glyphs
+class Canvas:
+    """An RGB framebuffer with tiny vector/text drawing helpers."""
 
+    def __init__(self, w, h, bg):
+        self.w = w
+        self.h = h
+        self.px = bytearray(w * h * 3)
+        self.fill_rect(0, 0, w, h, bg)
 
-GLYPHS = build_glyphs()
-GLYPH_INDEX = {ch: i for i, ch in enumerate(CHARSET)}
+    def _idx(self, x, y):
+        return (y * self.w + x) * 3
 
+    def plot(self, x, y, color):
+        if 0 <= x < self.w and 0 <= y < self.h:
+            i = self._idx(x, y)
+            self.px[i:i + 3] = bytes(color)
 
-class Page:
-    def __init__(self):
-        self.buf = bytearray(bytes(PAPER) * (W * H))
-
-    def fill(self, x, y, w, h, color):
+    def fill_rect(self, x, y, w, h, color):
         x0 = max(0, x)
         y0 = max(0, y)
-        x1 = min(W, x + w)
-        y1 = min(H, y + h)
+        x1 = min(self.w, x + w)
+        y1 = min(self.h, y + h)
         if x1 <= x0 or y1 <= y0:
             return
         row = bytes(color) * (x1 - x0)
         for yy in range(y0, y1):
-            i = (yy * W + x0) * 3
-            self.buf[i:i + len(row)] = row
+            i = self._idx(x0, yy)
+            self.px[i:i + len(row)] = row
 
-    def set_px(self, x, y, color):
-        if 0 <= x < W and 0 <= y < H:
-            i = (y * W + x) * 3
-            self.buf[i:i + 3] = bytes(color)
+    def hline(self, x, y, w, color, thick=1):
+        self.fill_rect(x, y, w, thick, color)
 
-    def hline(self, x, y, w, color, t=1):
-        self.fill(x, y, w, t, color)
+    def block(self, x, y, s, color):
+        """Draw an s x s solid block (one scaled font pixel)."""
+        self.fill_rect(x, y, s, s, color)
 
-    def vline(self, x, y, h, color, t=1):
-        self.fill(x, y, t, h, color)
+    def ellipse_outline(self, cx, cy, rx, ry, color, thick=2):
+        steps = 160
+        for k in range(steps):
+            import math
+            a = 2 * math.pi * k / steps
+            x = int(round(cx + rx * math.cos(a)))
+            y = int(round(cy + ry * math.sin(a)))
+            self.block(x - thick // 2, y - thick // 2, thick, color)
 
-    def line(self, x0, y0, x1, y1, color, t=1):
-        dx = abs(x1 - x0)
-        dy = -abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx + dy
-        x, y = x0, y0
-        while True:
-            self.fill(x - t // 2, y - t // 2, t, t, color)
-            if x == x1 and y == y1:
-                break
-            e2 = 2 * err
-            if e2 >= dy:
-                err += dy
-                x += sx
-            if e2 <= dx:
-                err += dx
-                y += sy
-
-    def disc(self, cx, cy, r, color):
-        for dy in range(-r, r + 1):
-            dx = int((r * r - dy * dy) ** 0.5)
-            self.fill(cx - dx, cy + dy, 2 * dx + 1, 1, color)
-
-    def ellipse(self, cx, cy, rx, ry, color):
-        for dy in range(-ry, ry + 1):
-            if ry == 0:
-                dx = 0
-            else:
-                dx = int(rx * (1 - (dy * dy) / (ry * ry)) ** 0.5)
-            self.fill(cx - dx, cy + dy, 2 * dx + 1, 1, color)
-
-    def ring(self, cx, cy, r, color, t=2):
-        for dy in range(-r, r + 1):
-            for dx in range(-r, r + 1):
-                d = (dx * dx + dy * dy) ** 0.5
-                if r - t < d <= r:
-                    self.set_px(cx + dx, cy + dy, color)
-
-    def tri(self, pts, color):
-        ys = [q[1] for q in pts]
-        for yy in range(min(ys), max(ys) + 1):
-            inter = []
-            for i in range(3):
-                ax, ay = pts[i]
-                bx, by = pts[(i + 1) % 3]
-                if ay == by:
-                    continue
-                if min(ay, by) <= yy < max(ay, by):
-                    xx = ax + (yy - ay) * (bx - ax) / (by - ay)
-                    inter.append(xx)
-            if len(inter) >= 2:
-                inter.sort()
-                a = int(inter[0])
-                b = int(inter[-1])
-                self.fill(a, yy, b - a + 1, 1, color)
-
-    def text(self, x, y, s, scale, color):
-        cx = x
-        adv = CELL_W * scale + 1
-        for ch in s:
-            gi = GLYPH_INDEX.get(ch)
-            if gi is not None:
-                for dx, dy in GLYPHS[gi]:
-                    self.fill(cx + dx * scale, y + dy * scale,
-                              scale, scale, color)
-            cx += adv
-        return cx
-
-    def text_w(self, s, scale):
-        if not s:
-            return 0
-        return len(s) * (CELL_W * scale + 1) - 1
-
-    def text_center(self, cx, y, s, scale, color):
-        w = self.text_w(s, scale)
-        return self.text(cx - w // 2, y, s, scale, color)
+    def circle_outline(self, cx, cy, r, color, thick=3):
+        self.ellipse_outline(cx, cy, r, r, color, thick)
 
 
-def icon_box(p, x, y, s):
-    p.fill(x, y, s, s, BOX)
-    p.hline(x, y, s, INK, 2)
-    p.hline(x, y + s - 2, s, INK, 2)
-    p.vline(x, y, s, INK, 2)
-    p.vline(x + s - 2, y, s, INK, 2)
+def text_width(text, size, scale=1, tracking=0):
+    total = 0
+    for ch in text:
+        total += FONT[size][ord(ch)][0]
+    total = total * scale + tracking * max(0, len(text) - 1)
+    return total
 
 
-def icon_korea(p, x, y, s):
-    # An office building with a flag, struck through in red: shut.
-    icon_box(p, x, y, s)
-    bx, by = x + 30, y + 62
-    bw, bh = 80, 56
-    p.fill(bx, by, bw, bh, BLUE)
-    for r in range(3):
-        for c in range(4):
-            p.fill(bx + 8 + c * 19, by + 8 + r * 15, 11, 9, WHITE)
-    p.fill(bx + 34, by + bh - 16, 12, 16, INK)
-    p.vline(bx + 40, y + 16, 46, INK, 3)
-    p.fill(bx + 43, y + 16, 30, 18, RED)
-    p.line(bx - 2, by + bh + 2, bx + bw + 2, by - 2, RED, 4)
+def draw_text(cv, x, baseline, text, size, scale=1, color=INK, tracking=0):
+    """Draw text with its baseline at `baseline`; return the end x."""
+    pen = x
+    asc = ASCENT[size] * scale
+    for ch in text:
+        adv, left, top, w, h, b64 = FONT[size][ord(ch)]
+        if w and h:
+            rows = base64.b64decode(b64)
+            stride = (w + 7) // 8
+            gx = pen + left * scale
+            gy = baseline - asc + top * scale
+            for ry in range(h):
+                byte_row = rows[ry * stride:(ry + 1) * stride]
+                for rx in range(w):
+                    if byte_row[rx // 8] >> (7 - rx % 8) & 1:
+                        cv.block(gx + rx * scale, gy + ry * scale, scale, color)
+        pen += adv * scale + tracking
+    return pen
 
 
-def icon_turkey(p, x, y, s):
-    icon_box(p, x, y, s)
-    cx, cy = x + 60, y + 78
-    for a, col in [(-50, BROWN), (-25, ORANGE), (0, RED),
-                   (25, BROWN), (50, ORANGE)]:
-        rad = math.radians(a)
-        ex = cx + int(38 * math.sin(rad))
-        ey = cy - int(38 * math.cos(rad))
-        p.line(cx, cy - 6, ex, ey, col, 3)
-    p.ellipse(cx, cy, 28, 22, BROWN)
-    p.ellipse(cx - 8, cy + 3, 13, 9, DARK_BROWN)
-    p.disc(cx + 20, cy - 24, 10, BROWN)
-    p.tri([(cx + 28, cy - 26), (cx + 38, cy - 22),
-           (cx + 28, cy - 18)], ORANGE)
-    p.disc(cx + 24, cy - 14, 4, RED)
-    p.disc(cx + 22, cy - 27, 2, INK)
-    p.vline(cx - 8, cy + 20, 10, ORANGE, 3)
-    p.vline(cx + 8, cy + 20, 10, ORANGE, 3)
+def draw_text_centered(cv, cx, baseline, text, size, scale=1, color=INK,
+                       tracking=0):
+    x = cx - text_width(text, size, scale, tracking) // 2
+    return draw_text(cv, x, baseline, text, size, scale, color, tracking)
 
 
-def icon_who(p, x, y, s):
-    icon_box(p, x, y, s)
-    cx, cy = x + s // 2, y + s // 2
-    p.disc(cx, cy, 34, WHITE)
-    p.ring(cx, cy, 34, INK, 2)
-    p.fill(cx - 10, cy - 26, 20, 52, RED)
-    p.fill(cx - 26, cy - 10, 52, 20, RED)
+def wrap(text, size, scale, max_width, tracking=0):
+    """Greedy word wrap; returns a list of lines that fit max_width."""
+    words = text.split(" ")
+    lines = []
+    cur = ""
+    for word in words:
+        trial = word if not cur else cur + " " + word
+        if text_width(trial, size, scale, tracking) <= max_width:
+            cur = trial
+        else:
+            if cur:
+                lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    return lines
 
 
-def icon_ball(p, x, y, s):
-    icon_box(p, x, y, s)
-    cx, cy = x + s // 2, y + s // 2
-    p.disc(cx, cy, 36, WHITE)
-    p.ring(cx, cy, 36, INK, 2)
-    p.disc(cx, cy, 10, INK)
-    for k in range(5):
-        rad = math.radians(72 * k - 90)
-        px = cx + int(23 * math.cos(rad))
-        py = cy + int(23 * math.sin(rad))
-        p.disc(px, py, 5, INK)
-
-
-LEAD_BODY = [
-    "Kim Yo Jong says the Swiss office in",
-    "Pyongyang has lost its reason to exist",
-    "after Bern sanctioned a children's camp",
-    "over Ukrainian children. She will ask the",
-    "Foreign Ministry to weigh closing it.",
-]
-TURKEY_BODY = [
-    "Trump pardons Freedom and Feathers at 2 p.m.",
-    "on the South Lawn in the 79th annual rite.",
-    "Both birds are spared; the public picks the",
-    "one that takes the ceremonial spotlight.",
-]
-WHO_BODY = [
-    "Tedros tours a darkened children's heart ward in",
-    "Havana as blackouts bite on day three of his visit.",
-]
-CITY_BODY = [
-    "Maresca calls life after Guardiola a reset as",
-    "City host Napoli tonight, six points off the top.",
-]
-TICKER_1 = "SWISS OFFICE OPENED OCT 19 \u2022 TEDROS: 2ND CUBA VISIT"
-TICKER_2 = "FREEDOM 42 LB, FEATHERS 40 LB \u2022 DE BRUYNE BACK AT ETIHAD"
-
-ALL_TEXT = [
-    "THE WORLD TODAY",
-    "TUESDAY, 24 NOVEMBER 2026",
-    "KOREA",
-    "N. KOREA THREATENS",
-    "TO SHUT SWISS OFFICE",
-    "WASHINGTON",
-    "TRUMP PARDONS TURKEYS",
-    "FREEDOM & FEATHERS",
-    "HEALTH",
-    "WHO CHIEF IN CUBA",
-    "SPORT",
-    "CITY HOST NAPOLI TONIGHT",
-    TICKER_1,
-    TICKER_2,
-] + LEAD_BODY + TURKEY_BODY + WHO_BODY + CITY_BODY
-
-
-def draw():
-    for s in ALL_TEXT:
-        for ch in s:
-            assert ch in GLYPH_INDEX, repr(ch)
-    p = Page()
-    mx = 36
-    cw = W - 2 * mx
-    # Masthead.
-    p.text_center(W // 2, 14, "THE WORLD TODAY", 4, INK)
-    p.hline(mx, 90, cw, INK, 2)
-    # Date band.
-    p.fill(mx, 98, cw, 44, RED)
-    p.text_center(W // 2, 103, "TUESDAY, 24 NOVEMBER 2026", 2, WHITE)
-    p.hline(mx, 150, cw, INK, 2)
-    # Lead: N. Korea.
-    p.text(mx, 162, "KOREA", 1, RED)
-    p.text(mx, 186, "N. KOREA THREATENS", 3, INK)
-    p.text(mx, 243, "TO SHUT SWISS OFFICE", 3, INK)
-    icon_korea(p, mx, 306, 140)
-    by = 308
-    for ln in LEAD_BODY:
-        p.text(mx + 158, by, ln, 1, INK)
-        by += 23
-    p.hline(mx, 458, cw, INK, 2)
-    # Second story: turkey pardon.
-    p.text(mx, 470, "WASHINGTON", 1, RED)
-    p.text(mx, 494, "TRUMP PARDONS TURKEYS", 2, INK)
-    p.text(mx, 532, "FREEDOM & FEATHERS", 2, INK)
-    icon_turkey(p, mx, 578, 120)
-    by = 580
-    for ln in TURKEY_BODY:
-        p.text(mx + 138, by, ln, 1, INK)
-        by += 23
-    p.hline(mx, 710, cw, INK, 2)
-    # Band 1: WHO in Cuba.
-    icon_who(p, mx, 724, 96)
-    p.text(mx + 112, 726, "HEALTH", 1, RED)
-    p.text(mx + 112, 748, "WHO CHIEF IN CUBA", 2, INK)
-    by = 788
-    for ln in WHO_BODY:
-        p.text(mx + 112, by, ln, 1, INK)
-        by += 23
-    p.hline(mx, 844, cw, INK, 2)
-    # Band 2: Man City v Napoli.
-    icon_ball(p, mx, 858, 96)
-    p.text(mx + 112, 860, "SPORT", 1, RED)
-    p.text(mx + 112, 882, "CITY HOST NAPOLI TONIGHT", 2, INK)
-    by = 922
-    for ln in CITY_BODY:
-        p.text(mx + 112, by, ln, 1, INK)
-        by += 23
-    p.hline(mx, 976, cw, INK, 2)
-    # Ticker.
-    p.fill(mx, 982, cw, 38, BLACK)
-    p.text(mx + 12, 986, TICKER_1, 1, WHITE)
-    p.text(mx + 12, 1003, TICKER_2, 1, WHITE)
-    return p
-
-
-def write_png(path, w, h, rgb):
+def write_png(cv):
+    """Encode the framebuffer as a PNG (stdlib zlib, filter 0 rows)."""
     raw = bytearray()
-    stride = w * 3
-    for y in range(h):
+    stride = cv.w * 3
+    for y in range(cv.h):
         raw.append(0)
-        raw += rgb[y * stride:(y + 1) * stride]
-    comp = zlib.compress(bytes(raw), 9)
+        raw += cv.px[y * stride:(y + 1) * stride]
+    data = zlib.compress(bytes(raw), 6)
 
-    def chunk(typ, data):
-        out = struct.pack(">I", len(data)) + typ + data
-        out += struct.pack(">I", binascii.crc32(typ + data) & 0xFFFFFFFF)
+    def chunk(ctype, payload):
+        out = struct.pack(">I", len(payload)) + ctype + payload
+        out += struct.pack(">I", zlib.crc32(ctype + payload) & 0xFFFFFFFF)
         return out
 
-    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
-    png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
-           + chunk(b"IDAT", comp) + chunk(b"IEND", b""))
-    with open(path, "wb") as f:
-        f.write(png)
-    return len(png)
+    ihdr = struct.pack(">IIBBBBB", cv.w, cv.h, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", data) + chunk(b"IEND", b""))
+
+
+# ---------------------------------------------------------------- layout
+
+MX = 44            # side margin
+CW = W - 2 * MX    # content width: 936
+
+LEAD_HEAD = [
+    "KIM YO-JONG THREATENS",
+    "TO SHUT SWISS OFFICE",
+    "IN PYONGYANG",
+]
+LEAD_SUB = [
+    "She calls it an 'open hostile act' — the office",
+    "has 'lost its reason to exist,' KCNA reports",
+]
+
+# (tag, tag color, line 1, line 2)
+ROWS = [
+    ("GAZA", RED, "GAZA — ISRAELI STRIKE KILLS HAMAS",
+     "SECURITY CHIEF IN GAZA CITY"),
+    ("UKRAINE", BLUE, "UKRAINE — RUSSIAN STRIKE KILLS 2,",
+     "WOUNDS 40 IN ZAPORIZHZHIA"),
+    ("BRITAIN", SLATE, "BRITAIN — MI5 WARNS UK FIRMS OF",
+     "RUSSIAN SABOTAGE THREAT"),
+    ("U.S.", NAVY, "U.S. — TRUMP PARDONS TURKEYS",
+     "FREEDOM AND FEATHERS"),
+    ("SPORT", GREEN, "SPORT — MAN CITY HOST NAPOLI",
+     "IN CHAMPIONS LEAGUE TONIGHT"),
+]
+
+TICKER_LINES = [
+    "ALSO: Germany first into Ukraine's Delta system",
+    "Iraq takes Kurdish oilfields — Reuters · AP · KCNA · UEFA",
+]
+
+
+def draw_row(cv, y, tag, color, line1, line2):
+    """One secondary story: two headline lines, tag in color on line 1."""
+    # tag segment ("GAZA —") in color, the rest of line 1 in ink
+    head = tag + " —"
+    x = MX
+    draw_text(cv, x, y + 38, head, 40, 1, color)
+    x += text_width(head, 40, 1)
+    rest = line1[len(head):]
+    draw_text(cv, x, y + 38, rest, 40, 1, INK)
+    draw_text(cv, MX, y + 38 + 38, line2, 40, 1, INK)
+
+
+def build():
+    cv = Canvas(W, H, PAPER)
+
+    # ---- masthead ----
+    cv.hline(MX, 24, CW, RED, 5)
+    draw_text_centered(cv, W // 2, 40 + 76, "THE WORLD TODAY", 40, 2, INK)
+    cv.hline(MX, 124, CW, RED, 3)
+    draw_text_centered(cv, W // 2, 140 + 38, "TUESDAY, 24 NOVEMBER 2026",
+                       40, 1, INK, tracking=5)
+    cv.hline(MX, 186, CW, INK, 2)
+
+    # ---- lead story panel ----
+    cv.fill_rect(MX, 200, CW, 296, PANEL)
+    cv.fill_rect(MX, 200, CW, 4, RED)
+    draw_text(cv, MX + 20, 218 + 38, "NORTH KOREA", 40, 1, RED)
+    # small globe, top right of the panel
+    cv.circle_outline(916, 244, 26, RED, 3)
+    cv.ellipse_outline(916, 244, 11, 26, RED, 2)
+    cv.hline(890, 244, 52, RED, 2)
+    for i, line in enumerate(LEAD_HEAD):
+        draw_text(cv, MX + 20, 272 + i * 54 + 54, line, 28, 2, INK)
+    for i, line in enumerate(LEAD_SUB):
+        draw_text(cv, MX + 20, 436 + i * 28 + 27, line, 28, 1, INK)
+
+    # ---- secondary stories ----
+    cv.hline(MX, 512, CW, INK, 2)
+    y = 528
+    for tag, color, line1, line2 in ROWS:
+        draw_row(cv, y, tag, color, line1, line2)
+        y += 84
+        if tag != ROWS[-1][0]:
+            cv.hline(MX, y - 6, CW, GRAY, 1)
+
+    # ---- ticker (second line doubles as the sources line) ----
+    cv.hline(MX, 958, CW, INK, 2)
+    draw_text(cv, MX, 968 + 26, "ALSO:", 28, 1, RED)
+    x = MX + text_width("ALSO: ", 28, 1)
+    draw_text(cv, x, 968 + 26,
+              TICKER_LINES[0][len("ALSO: "):], 28, 1, INK)
+    draw_text(cv, MX, 994 + 26, TICKER_LINES[1], 28, 1, INK)
+
+    return cv
 
 
 def main():
-    outdir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
-    os.makedirs(outdir, exist_ok=True)
-    path = os.path.join(outdir, "entry.png")
-    p = draw()
-    n = write_png(path, W, H, bytes(p.buf))
-    print("wrote", path, n, "bytes")
+    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR") or "/output"
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError:
+        out_dir = "out"
+        os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, "entry.png")
+    with open(path, "wb") as f:
+        f.write(write_png(build()))
+    print("wrote", path, os.path.getsize(path), "bytes")
 
 
 if __name__ == "__main__":
